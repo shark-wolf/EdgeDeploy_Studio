@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ==============================================================================
 # 脚本名称: package.py
-# 核心职责: 跨平台 Flutter 桌面端自动化打包脚本 (完美适配 Windows / macOS / Linux)
+# 核心职责: 跨平台 Flutter 桌面端自动化打包脚本 (自动适配 Windows / macOS / Linux)
 # 使用方法:
 #   1. 正常打包: python package.py
 #   2. 清理并打包: python package.py --clean
@@ -11,12 +11,11 @@ import os
 import sys
 import platform
 import shutil
-import subprocess
 import zipfile
 import argparse
 
 def run_command(cmd):
-    """执行子进程命令并实时输出"""
+    """执行子进程命令并实时输出（Windows 下开启 shell=True 以正确识别 flutter.bat）"""
     print(f"[*] 正在执行: {' '.join(cmd) if isinstance(cmd, list) else cmd}")
     is_windows = platform.system() == "Windows"
     result = subprocess.run(cmd, shell=is_windows)
@@ -25,7 +24,7 @@ def run_command(cmd):
         sys.exit(result.returncode)
 
 def main():
-    parser = argparse.ArgumentParser(description="EdgeDeploy-Studio 跨平台打包脚本")
+    parser = argparse.ArgumentParser(description="EdgeDeploy-Studio 跨平台全依赖打包脚本")
     parser.add_argument("--clean", action="store_true", help="打包前执行 flutter clean 清理缓存")
     args = parser.parse_args()
 
@@ -54,8 +53,7 @@ def main():
         shutil.rmtree(dist_dir)
     os.makedirs(target_output_dir, exist_ok=True)
 
-    # ------------------------------------------------------------------
-    uploader_zip = ""
+    zip_filename = ""
 
     if current_os == "Windows":
         print("[*] 正在构建 Windows Release 版本...")
@@ -93,7 +91,6 @@ def main():
             print(f"[-] 错误: 未找到编译产物目录: {source_build_dir}")
             sys.exit(1)
 
-        # 在 Release 目录下寻找 .app 目标
         app_bundle_name = None
         for item in os.listdir(source_build_dir):
             if item.endswith(".app"):
@@ -112,7 +109,6 @@ def main():
 
         zip_filename = os.path.join(dist_dir, f"{app_name}-macOS.zip")
         print(f"[*] 正在使用 macOS 原生 ditto 命令进行安全归档（保留软链接与签名属性）...")
-        # 使用 Apple 推荐的 ditto 命令，避免 .app 内部的 symlink 损坏
         run_command(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", target_app_path, zip_filename])
 
     elif current_os == "Linux":

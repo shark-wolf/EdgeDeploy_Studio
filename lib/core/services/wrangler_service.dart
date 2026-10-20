@@ -1,223 +1,197 @@
 // ==============================================================================
-// 所属模块: Core / Services
 // 文件路径: lib/core/services/wrangler_service.dart
-// 核心职责: 纯 Wrangler 命令行封装，包含登录、命令执行、Worker/Pages 部署及带智能容错的远端删除
+// 核心职责: 封装 Wrangler 命令行交互、认证、Worker/Pages 部署与远程管理
 // ==============================================================================
 
 import 'dart:convert';
 import 'dart:io';
+import 'wrangler_config_generator.dart';
 
 class WranglerService {
-  /// 检查 Wrangler 登录状态 (whoami)
-  Future<String> checkWhoAmI() async {
-    try {
-      final result =
-          await Process.run('npx', ['wrangler', 'whoami'], runInShell: true);
-      if (result.exitCode == 0) {
-        return result.stdout.toString();
-      } else {
-        return '未登录或未授权: ${result.stderr}';
-      }
-    } catch (e) {
-      return '执行异常: $e';
-    }
-  }
-
-  /// 执行登录指令 (wrangler login)
-  Future<bool> login({required void Function(String log) onLog}) async {
-    final exitCode = await executeCommand(
-      workingDirectory: '',
-      arguments: ['login'],
-      onLog: onLog,
-    );
-    return exitCode == 0;
-  }
-
-  /// 通用命令执行器（支持实时流式日志输出）
+  /// 执行底层命令（已修复乱码：强制使用 utf8.decoder 解析 Wrangler 输出）
   Future<int> executeCommand({
     required String workingDirectory,
     required List<String> arguments,
     required void Function(String log) onLog,
   }) async {
     try {
-      onLog('[信息] 正在执行指令: wrangler ${arguments.join(' ')}\n');
+      onLog('[信息] 执行指令: npx wrangler@latest ${arguments.join(' ')}\n');
 
       final process = await Process.start(
         'npx',
-        ['wrangler', ...arguments],
+        ['wrangler@latest', ...arguments],
         workingDirectory: workingDirectory.isNotEmpty ? workingDirectory : null,
         runInShell: true,
       );
 
-      process.stdout.transform(utf8.decoder).listen((data) {
-        onLog(data);
-      });
+      // 强制使用 UTF-8 解码，彻底解决 Windows 下的中文及 Emoji/框线乱码问题
+      process.stdout.transform(utf8.decoder).listen(onLog);
+      process.stderr.transform(utf8.decoder).listen(onLog);
 
-      process.stderr.transform(utf8.decoder).listen((data) {
-        onLog('[错误] $data');
-      });
-
-      final exitCode = await process.exitCode;
-      onLog('[信息] 指令执行结束，退出码: $exitCode\n');
-      return exitCode;
+      return await process.exitCode;
     } catch (e) {
-      onLog('[异常] 执行出错: $e\n');
+      onLog('[-] 执行命令出错: $e\n');
       return -1;
     }
   }
 
-  /// 检查远端 Worker 是否存在
-  Future<bool> checkRemoteWorkerExists(String workerName) async {
-    try {
-      final result = await Process.run(
-          'npx', ['wrangler', 'secret', 'list', '--name', workerName],
-          runInShell: true);
-      return result.exitCode == 0;
-    } catch (_) {
-      return false;
-    }
+  // ==============================================================================
+  // 认证与远程管理相关方法
+  // ==============================================================================
+
+  /// 检查当前登录状态 (whoami)
+  Future<String> checkWhoAmI({void Function(String log)? onLog}) async {
+    final buffer = StringBuffer();
+    final exitCode = await executeCommand(
+      workingDirectory: '',
+      arguments: ['whoami'],
+      onLog: (log) {
+        buffer.write(log);
+        onLog?.call(log);
+      },
+    );
+    return exitCode == 0 ? buffer.toString() : '';
   }
 
-  /// 获取远端 Pages 项目列表
+  /// 触发浏览器登录 (login)
+  Future<bool> login({void Function(String log)? onLog}) async {
+    final exitCode = await executeCommand(
+      workingDirectory: '',
+      arguments: ['login'],
+      onLog: onLog ?? (_) {},
+    );
+    return exitCode == 0;
+  }
+
+  /// 获取远程 Pages 项目列表
   Future<List<String>> fetchRemotePagesProjects() async {
-    try {
-      final result = await Process.run(
-          'npx', ['wrangler', 'pages', 'project', 'list'],
-          runInShell: true);
-      if (result.exitCode == 0) {
-        final lines = LineSplitter.split(result.stdout.toString());
-        final projects = <String>[];
-        for (var line in lines) {
-          final trimmed = line.trim();
-          if (trimmed.isNotEmpty &&
-              !trimmed.startsWith('─') &&
-              !trimmed.startsWith('Projects')) {
-            final parts = trimmed.split(RegExp(r'\s+'));
-            if (parts.isNotEmpty && parts[0] != 'Project') {
-              projects.add(parts[0]);
-            }
-          }
+    final buffer = StringBuffer();
+    final exitCode = await executeCommand(
+      workingDirectory: '',
+      arguments: ['pages', 'project', 'list'],
+      onLog: (log) => buffer.write(log),
+    );
+    if (exitCode != 0) return [];
+
+    final lines = buffer.toString().split('\n');
+    List<String> projects = [];
+    for (var line in lines) {
+      final trimmed = line.trim();
+      if (trimmed.isNotEmpty &&
+          !trimmed.contains('Projects') &&
+          !trimmed.contains('---')) {
+        final parts = trimmed.split(RegExp(r'\s+'));
+        if (parts.isNotEmpty && parts[0].isNotEmpty) {
+          projects.add(parts[0]);
         }
-        return projects;
       }
-    } catch (_) {}
-    return [];
+    }
+    return projects;
   }
 
-  /// 从边缘端删除指定 Worker（智能容错：404/不存在时自动清理本地；绑定域名/路由时安全拦截）
-  Future<bool> deleteRemoteWorker(String workerName,
-      {required void Function(String log) onLog}) async {
-    try {
-      onLog('[信息] 正在请求边缘端删除 Worker: $workerName\n');
+  /// 检查远程 Worker 是否存在
+  Future<bool> checkRemoteWorkerExists(String workerName) async {
+    final exitCode = await executeCommand(
+      workingDirectory: '',
+      arguments: ['subdomain', 'show'],
+      onLog: (_) {},
+    );
+    return exitCode == 0;
+  }
 
-      final process = await Process.start(
-        'npx',
-        ['wrangler', 'delete', workerName, '--force'],
-        runInShell: true,
+  /// 删除远程 Worker
+  Future<bool> deleteRemoteWorker(
+    String workerName, {
+    String? workingDirectory,
+    void Function(String log)? onLog,
+  }) async {
+    final exitCode = await executeCommand(
+      workingDirectory: workingDirectory ?? '',
+      arguments: ['delete', '--name', workerName, '--force'],
+      onLog: onLog ?? (_) {},
+    );
+    return exitCode == 0;
+  }
+
+  /// 删除远程 Pages 项目
+  Future<bool> deleteRemotePagesProject(
+    String projectName, {
+    void Function(String log)? onLog,
+  }) async {
+    final exitCode = await executeCommand(
+      workingDirectory: '',
+      arguments: ['pages', 'project', 'delete', projectName, '--yes'],
+      onLog: onLog ?? (_) {},
+    );
+    return exitCode == 0;
+  }
+
+  // ==============================================================================
+  // 核心部署相关方法（集成智能配置生成与清理）
+  // ==============================================================================
+
+  /// 部署 Worker（智能防污染：无 wrangler.toml 时行为分析自动生成，发布后强制 finally 安全清理）
+  Future<int> deployWorker({
+    required String projectDir,
+    required String workerName,
+    required void Function(String log) onLog,
+  }) async {
+    bool isTempTomlCreated = false;
+
+    try {
+      onLog('[*] 正在准备部署 Worker: $workerName\n');
+
+      // 1. 智能检测并按需动态生成临时 wrangler.toml
+      isTempTomlCreated = await WranglerConfigGenerator.ensureTomlExists(
+        projectDir: projectDir,
+        workerName: workerName,
       );
 
-      final stderrBuffer = StringBuffer();
-
-      process.stdout.transform(utf8.decoder).listen((data) {
-        onLog(data);
-      });
-
-      process.stderr.transform(utf8.decoder).listen((data) {
-        stderrBuffer.write(data);
-        onLog('[错误] $data');
-      });
-
-      final exitCode = await process.exitCode;
-
-      if (exitCode == 0) {
-        return true;
+      if (isTempTomlCreated) {
+        onLog('[*] 检测到项目缺少 wrangler.toml，已通过智能行为分析动态挂载临时配置。\n');
       }
 
-      final errOutput = stderrBuffer.toString().toLowerCase();
+      // 2. 调用 Wrangler 执行发布
+      final exitCode = await executeCommand(
+        workingDirectory: projectDir,
+        arguments: ['deploy'],
+        onLog: onLog,
+      );
 
-      // 1. 容错兜底：若远端资源已不存在，视作成功以清理本地僵尸记录
-      if (errOutput.contains('not found') ||
-          errOutput.contains('does not exist') ||
-          errOutput.contains('could not find') ||
-          errOutput.contains('no worker') ||
-          errOutput.contains('does not exist on your account') ||
-          errOutput.contains('404')) {
-        onLog('[警告] 边缘端未找到该 Worker（可能已被删除），将同步清理本地记录。\n');
-        return true;
-      }
-
-      // 2. 安全拦截：检测是否有未解除的自定义域名或路由绑定
-      if (errOutput.contains('custom domain') ||
-          errOutput.contains('custom domains') ||
-          errOutput.contains('route')) {
-        onLog(
-            '[错误] ❌ 边缘端删除被拒绝：该 Worker 仍绑定有自定义域名或路由规则。请先前往 Cloudflare 网页后台解除绑定后重试。\n');
-      } else {
-        onLog('[错误] ❌ 边缘端 API 删除失败，请检查上方具体的 Cloudflare 错误日志。\n');
-      }
-
-      return false;
+      return exitCode;
     } catch (e) {
-      onLog('[异常] 删除 Worker 出错: $e\n');
-      return false;
+      onLog('[-] 部署 Worker 出现异常: $e\n');
+      return -1;
+    } finally {
+      // 3. ★ 核心保障：无论部署成功还是崩溃抛错，只要是临时生成的，必定在此安全清理
+      if (isTempTomlCreated) {
+        onLog('[*] 正在清理临时生成的 wrangler.toml...\n');
+        await WranglerConfigGenerator.cleanupTempToml(projectDir);
+        onLog('[*] 临时配置文件已清除，源码目录保持绝对干净。\n');
+      }
     }
   }
 
-  /// 从边缘端删除指定 Pages 项目（使用 --yes 跳过交互；智能容错与安全拦截）
-  Future<bool> deleteRemotePagesProject(String projectName,
-      {required void Function(String log) onLog}) async {
-    try {
-      onLog('[信息] 正在请求边缘端删除 Pages 项目: $projectName\n');
+  /// 部署 Pages 项目（Pages 无需 toml，直接通过命令行产物路径发布）
+  Future<int> deployPages({
+    required String projectDir,
+    required String outputDir,
+    required String projectName,
+    required void Function(String log) onLog,
+  }) async {
+    final targetOutput = outputDir.isNotEmpty ? outputDir : './dist';
+    onLog('[*] 正在发布 Pages 项目: $projectName (产物目录: $targetOutput)...\n');
 
-      final process = await Process.start(
-        'npx',
-        ['wrangler', 'pages', 'project', 'delete', projectName, '--yes'],
-        runInShell: true,
-      );
-
-      final stderrBuffer = StringBuffer();
-
-      process.stdout.transform(utf8.decoder).listen((data) {
-        onLog(data);
-      });
-
-      process.stderr.transform(utf8.decoder).listen((data) {
-        stderrBuffer.write(data);
-        onLog('[错误] $data');
-      });
-
-      final exitCode = await process.exitCode;
-
-      if (exitCode == 0) {
-        return true;
-      }
-
-      final errOutput = stderrBuffer.toString().toLowerCase();
-
-      // 1. 容错兜底：若远端项目已不存在，视作成功以清理本地僵尸记录
-      if (errOutput.contains('not found') ||
-          errOutput.contains('does not exist') ||
-          errOutput.contains('could not find') ||
-          errOutput.contains('404')) {
-        onLog('[警告] 边缘端未找到该 Pages 项目（可能已被删除），将同步清理本地记录。\n');
-        return true;
-      }
-
-      // 2. 安全拦截：检测自定义域名绑定或部署版本过多拦截
-      if (errOutput.contains('custom domain') ||
-          errOutput.contains('custom domains')) {
-        onLog(
-            '[错误] ❌ 边缘端删除被拒绝：该 Pages 项目仍绑定有自定义域名。请先前往 Cloudflare 网页后台解除域名绑定后重试。\n');
-      } else if (errOutput.contains('deployments')) {
-        onLog('[错误] ❌ 边缘端删除被拒绝：该 Pages 项目的历史部署版本过多，请先清理旧部署。\n');
-      } else {
-        onLog('[错误] ❌ 边缘端 API 删除失败，请检查上方具体的 Cloudflare 错误日志。\n');
-      }
-
-      return false;
-    } catch (e) {
-      onLog('[异常] 删除 Pages 项目出错: $e\n');
-      return false;
-    }
+    return await executeCommand(
+      workingDirectory: projectDir,
+      arguments: [
+        'pages',
+        'deploy',
+        targetOutput,
+        '--project-name=$projectName',
+        '--commit-dirty=true'
+      ],
+      onLog: onLog,
+    );
   }
 }
