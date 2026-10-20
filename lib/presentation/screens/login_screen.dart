@@ -1,64 +1,70 @@
 // ==============================================================================
 // 所属模块: Presentation / Screens
 // 文件路径: lib/presentation/screens/login_screen.dart
-// Service: 独立登录界面，通过 Wrangler 授权登录后方可进入系统
+// 核心职责: Wrangler 独立授权登录视图（米白色明亮主题、日志控制台实时响应）
 // ==============================================================================
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/services/wrangler_service.dart';
+import '../providers/log_provider.dart';
+import '../widgets/log_console_widget.dart';
 import '../widgets/custom_button.dart';
 
-class LoginScreen extends StatefulWidget {
+class LoginScreen extends ConsumerStatefulWidget {
   final VoidCallback onLoginSuccess;
 
   const LoginScreen({super.key, required this.onLoginSuccess});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends ConsumerState<LoginScreen> {
   final WranglerService _wranglerService = WranglerService();
-  bool _isLoading = false;
-  String _errorMessage = '';
+  bool _isLoggingIn = false;
 
   Future<void> _handleLogin() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = '';
-    });
+    if (_isLoggingIn) return;
 
-    // 1. 触发浏览器授权登录
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _isLoggingIn = true);
+
+    ref.read(logProvider.notifier).appendLog('\n[开始] 正在发起 Wrangler 授权登录...\n');
+
     final success = await _wranglerService.login(
-      onLog: (log) => debugPrint(log),
+      onLog: (log) {
+        ref.read(logProvider.notifier).appendLog(log);
+      },
     );
 
-    if (success) {
-      // 2. 验证登录状态是否确实成功
-      final whoami = await _wranglerService.checkWhoAmI();
-      if (!whoami.contains('未检测到有效登录状态')) {
+    if (mounted) {
+      setState(() => _isLoggingIn = false);
+      if (success) {
+        ref.read(logProvider.notifier).appendLog('\n[成功] 授权登录完成！\n');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('🎉 Wrangler 授权登录成功！'),
+              backgroundColor: Colors.green),
+        );
         widget.onLoginSuccess();
       } else {
-        setState(() {
-          _errorMessage = '登录未完成或凭证无效，请重试。';
-          _isLoading = false;
-        });
+        ref.read(logProvider.notifier).appendLog('\n[失败] 授权登录未完成或中断。\n');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('❌ 授权登录失败，请检查控制台日志'), backgroundColor: Colors.red),
+        );
       }
-    } else {
-      setState(() {
-        _errorMessage = 'Wrangler 登录流程中断或失败。';
-        _isLoading = false;
-      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFFAF9F6),
+      backgroundColor: const Color(0xFFFAF9F6), // 米白色明亮主题
       body: Center(
         child: Container(
-          width: 480,
+          width: 650,
           padding: const EdgeInsets.all(40),
           decoration: BoxDecoration(
             color: Colors.white,
@@ -66,58 +72,55 @@ class _LoginScreenState extends State<LoginScreen> {
             border: Border.all(color: const Color(0xFFCBD5E1)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 15,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: Image.asset(
-                  'assets/icons/app_icon.png',
-                  width: 72,
-                  height: 72,
-                  fit: BoxFit.cover,
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'EdgeDeploy-Studio',
-                style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF0F172A)),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                '请先登录 Cloudflare 官方账户以继续使用桌面端',
-                style: TextStyle(color: Colors.grey, fontSize: 14),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 32),
-              if (_errorMessage.isNotEmpty)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  margin: const EdgeInsets.only(bottom: 20),
-                  decoration: BoxDecoration(
-                    color: Colors.red.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.red.shade200),
+              const Row(
+                children: [
+                  Icon(Icons.lock_outline, color: Color(0xFF2563EB), size: 32),
+                  SizedBox(width: 12),
+                  Text(
+                    'EdgeDeploy-Studio 授权登录',
+                    style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF0F172A)),
                   ),
-                  child: Text(_errorMessage,
-                      style:
-                          TextStyle(color: Colors.red.shade700, fontSize: 13)),
-                ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                '本应用基于 Wrangler CLI 进程驱动。请点击下方按钮唤起默认浏览器完成 Cloudflare 账户授权。',
+                style: TextStyle(
+                    color: Color(0xFF475569), fontSize: 13, height: 1.4),
+              ),
+              const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
                 child: CustomButton(
-                  text: _isLoading ? '正在等待网页授权...' : '使用 Cloudflare 账号登录',
-                  onPressed: _isLoading ? null : _handleLogin,
+                  text: _isLoggingIn ? '正在等待浏览器授权...' : '使用 Wrangler 授权登录',
+                  onPressed: _isLoggingIn ? null : _handleLogin,
                 ),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                '实时授权日志控制台:',
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: Color(0xFF0F172A)),
+              ),
+              const SizedBox(height: 8),
+              const SizedBox(
+                height: 200,
+                child: LogConsoleWidget(),
               ),
             ],
           ),

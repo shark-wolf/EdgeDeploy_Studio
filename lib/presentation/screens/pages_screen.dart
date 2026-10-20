@@ -1,7 +1,7 @@
 // ==============================================================================
 // 所属模块: Presentation / Screens
 // 文件路径: lib/presentation/screens/pages_screen.dart
-// 核心职责: Pages 静态托管发布视图（防重复点击，实时同步发布状态）
+// 核心职责: Pages 智能发布视图
 // ==============================================================================
 
 import 'package:flutter/material.dart';
@@ -22,52 +22,58 @@ class PagesScreen extends ConsumerStatefulWidget {
 }
 
 class _PagesScreenState extends ConsumerState<PagesScreen> {
-  final TextEditingController _pathController =
-      TextEditingController(text: 'test-pages/dist');
   final TextEditingController _nameController =
       TextEditingController(text: 'test-pages-app');
+  final TextEditingController _projectDirController =
+      TextEditingController(text: 'test-pages');
 
   final FocusNode _nameFocusNode = FocusNode();
-  final FocusNode _pathFocusNode = FocusNode();
+  final FocusNode _projectDirFocusNode = FocusNode();
+
   bool _isDeploying = false;
 
   @override
   void dispose() {
     _nameFocusNode.unfocus();
-    _pathFocusNode.unfocus();
+    _projectDirFocusNode.unfocus();
     _nameFocusNode.dispose();
-    _pathFocusNode.dispose();
-    _pathController.dispose();
+    _projectDirFocusNode.dispose();
     _nameController.dispose();
+    _projectDirController.dispose();
     super.dispose();
   }
 
-  Future<void> _pickDirectory() async {
+  Future<void> _pickProjectDirectory() async {
     String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
     if (selectedDirectory != null) {
       setState(() {
-        _pathController.text = selectedDirectory;
+        _projectDirController.text = selectedDirectory;
       });
     }
   }
 
   Future<void> _startDeploy() async {
-    // 【防重入保护】防止重复点击
     if (_isDeploying) return;
 
     FocusManager.instance.primaryFocus?.unfocus();
 
+    final projectName = _nameController.text.trim();
     setState(() => _isDeploying = true);
-    ref.read(deploymentStatusProvider.notifier).setPagesDeploying();
-    ref
-        .read(logProvider.notifier)
-        .appendLog('\n[开始] 部署 Pages 静态资产（项目名: ${_nameController.text}）...\n');
+
+    ref.read(deploymentStatusProvider.notifier).upsertItem(
+          name: projectName,
+          type: DeployType.page,
+          status: DeployStatus.deploying,
+          message: '正在部署...',
+        );
+
+    ref.read(logProvider.notifier).appendLog(
+        '\n[开始] 智能部署 Pages 项目（目录: ${_projectDirController.text}）...\n');
 
     final usecase = DeployPageUsecase(wranglerService: WranglerService());
     final exitCode = await usecase.execute(
-      projectDir: '.',
-      projectName: _nameController.text.trim(),
-      outputDir: _pathController.text.trim(),
+      projectDir: _projectDirController.text.trim(),
+      projectName: projectName,
       onLog: (log) {
         ref.read(logProvider.notifier).appendLog(log);
       },
@@ -76,11 +82,28 @@ class _PagesScreenState extends ConsumerState<PagesScreen> {
     if (mounted) {
       setState(() => _isDeploying = false);
       if (exitCode == 0) {
-        ref.read(deploymentStatusProvider.notifier).setPagesSuccess('部署成功');
+        ref.read(deploymentStatusProvider.notifier).upsertItem(
+              name: projectName,
+              type: DeployType.page,
+              status: DeployStatus.success,
+              message: '部署成功',
+            );
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('🎉 Page 部署成功！'), backgroundColor: Colors.green),
+        );
       } else {
-        ref
-            .read(deploymentStatusProvider.notifier)
-            .setPagesFailed('部署失败 (状态码: $exitCode)');
+        ref.read(deploymentStatusProvider.notifier).upsertItem(
+              name: projectName,
+              type: DeployType.page,
+              status: DeployStatus.failed,
+              message: '部署失败 (状态码: $exitCode)',
+            );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('❌ Page 部署失败 (状态码: $exitCode)'),
+              backgroundColor: Colors.red),
+        );
       }
     }
   }
@@ -114,24 +137,23 @@ class _PagesScreenState extends ConsumerState<PagesScreen> {
               ),
               const SizedBox(height: 16),
               TextField(
-                controller: _pathController,
-                focusNode: _pathFocusNode,
+                controller: _projectDirController,
+                focusNode: _projectDirFocusNode,
                 decoration: InputDecoration(
-                  labelText: '构建产物输出目录 (dist/build)',
+                  labelText: 'Pages 项目本地根路径 (自动检测并发布)',
                   border: const OutlineInputBorder(),
                   filled: true,
                   fillColor: Colors.white,
                   suffixIcon: IconButton(
                     icon: const Icon(Icons.folder_open, color: Colors.blue),
-                    tooltip: '浏览选择本地文件夹',
-                    onPressed: _pickDirectory,
+                    tooltip: '浏览选择项目根目录',
+                    onPressed: _pickProjectDirectory,
                   ),
                 ),
               ),
               const SizedBox(height: 16),
               CustomButton(
-                text: _isDeploying ? '正在部署 Pages...' : '部署静态资产到 Pages',
-                // 处于部署状态时禁用按钮
+                text: _isDeploying ? '正在发布 page...' : '一键发布page',
                 onPressed: _isDeploying ? null : _startDeploy,
               ),
               const SizedBox(height: 24),

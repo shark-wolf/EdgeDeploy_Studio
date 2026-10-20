@@ -1,7 +1,7 @@
 // ==============================================================================
 // 所属模块: Presentation / Screens
 // 文件路径: lib/presentation/screens/worker_screen.dart
-// 核心职责: Worker 管理与发布视图（防重复点击，实时同步发布状态）
+// 核心职责: Worker 管理与一键发布视图
 // ==============================================================================
 
 import 'package:flutter/material.dart';
@@ -22,10 +22,8 @@ class WorkerScreen extends ConsumerStatefulWidget {
 }
 
 class _WorkerScreenState extends ConsumerState<WorkerScreen> {
-  final TextEditingController _pathController =
-      TextEditingController(text: 'test-worker');
-  final TextEditingController _nameController =
-      TextEditingController(text: 'test-edge-worker');
+  final TextEditingController _pathController = TextEditingController(text: 'test-worker');
+  final TextEditingController _nameController = TextEditingController(text: 'test-edge-worker');
 
   final FocusNode _pathFocusNode = FocusNode();
   final FocusNode _nameFocusNode = FocusNode();
@@ -52,21 +50,26 @@ class _WorkerScreenState extends ConsumerState<WorkerScreen> {
   }
 
   Future<void> _startDeploy() async {
-    // 【防重入保护】如果正在部署，直接拦截点击事件
     if (_isDeploying) return;
 
     FocusManager.instance.primaryFocus?.unfocus();
 
+    final workerName = _nameController.text.trim();
     setState(() => _isDeploying = true);
-    ref.read(deploymentStatusProvider.notifier).setWorkerDeploying();
-    ref
-        .read(logProvider.notifier)
-        .appendLog('\n[开始] 准备触发 Worker 部署（目标名称: ${_nameController.text}）...\n');
+
+    ref.read(deploymentStatusProvider.notifier).upsertItem(
+      name: workerName,
+      type: DeployType.worker,
+      status: DeployStatus.deploying,
+      message: '正在发布...',
+    );
+
+    ref.read(logProvider.notifier).appendLog('\n[开始] 准备触发 Worker 部署（目标名称: $workerName）...\n');
 
     final usecase = DeployWorkerUsecase(wranglerService: WranglerService());
     final exitCode = await usecase.execute(
       projectDir: _pathController.text.trim(),
-      workerName: _nameController.text.trim(),
+      workerName: workerName,
       onLog: (log) {
         ref.read(logProvider.notifier).appendLog(log);
       },
@@ -75,11 +78,25 @@ class _WorkerScreenState extends ConsumerState<WorkerScreen> {
     if (mounted) {
       setState(() => _isDeploying = false);
       if (exitCode == 0) {
-        ref.read(deploymentStatusProvider.notifier).setWorkerSuccess('发布成功');
+        ref.read(deploymentStatusProvider.notifier).upsertItem(
+          name: workerName,
+          type: DeployType.worker,
+          status: DeployStatus.success,
+          message: '发布成功',
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('🎉 Worker 发布成功！'), backgroundColor: Colors.green),
+        );
       } else {
-        ref
-            .read(deploymentStatusProvider.notifier)
-            .setWorkerFailed('发布失败 (状态码: $exitCode)');
+        ref.read(deploymentStatusProvider.notifier).upsertItem(
+          name: workerName,
+          type: DeployType.worker,
+          status: DeployStatus.failed,
+          message: '发布失败 (状态码: $exitCode)',
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Worker 发布失败 (状态码: $exitCode)'), backgroundColor: Colors.red),
+        );
       }
     }
   }
@@ -95,11 +112,7 @@ class _WorkerScreenState extends ConsumerState<WorkerScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Cloudflare Workers 发布中心',
-                  style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF0F172A))),
+              const Text('Cloudflare Workers 发布中心', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
               const SizedBox(height: 16),
               TextField(
                 controller: _nameController,
@@ -129,8 +142,7 @@ class _WorkerScreenState extends ConsumerState<WorkerScreen> {
               ),
               const SizedBox(height: 16),
               CustomButton(
-                text: _isDeploying ? '正在发布 Worker...' : '一键发布 Worker',
-                // 当处于部署状态时传 null 禁用按钮，彻底防止重复点击
+                text: _isDeploying ? '正在发布 worker...' : '一键发布worker',
                 onPressed: _isDeploying ? null : _startDeploy,
               ),
               const SizedBox(height: 24),

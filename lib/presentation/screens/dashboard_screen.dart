@@ -1,7 +1,7 @@
 // ==============================================================================
 // 所属模块: Presentation / Screens
 // 文件路径: lib/presentation/screens/dashboard_screen.dart
-// 核心职责: 主控看板视图，集成双擎总览（实时同步发布状态）、多标签页切换与全局焦点托管
+// 核心职责: 主控看板，保留发布快捷入口，资产列表采用 Tab 标签页动态切换展示
 // ==============================================================================
 
 import 'package:flutter/material.dart';
@@ -72,7 +72,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 }
 
-/// Workers 与 Pages 专属架构总览视图（支持状态响应）
+/// 系统概览视图：快捷入口 + Tab 切换资产列表
 class WorkersAndPagesOverviewTab extends ConsumerStatefulWidget {
   final ValueChanged<int> onNavigate;
 
@@ -84,25 +84,36 @@ class WorkersAndPagesOverviewTab extends ConsumerStatefulWidget {
 }
 
 class _WorkersAndPagesOverviewTabState
-    extends ConsumerState<WorkersAndPagesOverviewTab> {
+    extends ConsumerState<WorkersAndPagesOverviewTab>
+    with SingleTickerProviderStateMixin {
   final WranglerService _wranglerService = WranglerService();
   String _envSummary = '正在加载 Wrangler 运行环境...';
+  late TabController _tabController;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _loadEnvSummary();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadEnvSummary() async {
     final status = await _wranglerService.checkWhoAmI();
     if (mounted) {
       setState(() {
-        if (status.contains('Email:')) {
+        if (status.contains('Email:') ||
+            status.contains('Token') ||
+            status.contains('Account')) {
           _envSummary = '已通过 Wrangler 授权连接';
         } else {
           _envSummary =
-              status.length > 60 ? '${status.substring(0, 60)}...' : status;
+              status.length > 50 ? '${status.substring(0, 50)}...' : status;
         }
       });
     }
@@ -124,8 +135,11 @@ class _WorkersAndPagesOverviewTabState
 
   @override
   Widget build(BuildContext context) {
-    // 监听全局部署状态（已移除无效的 const 关键字修饰）
     final deployState = ref.watch(deploymentStatusProvider);
+    final workerItems =
+        deployState.items.where((e) => e.type == DeployType.worker).toList();
+    final pageItems =
+        deployState.items.where((e) => e.type == DeployType.page).toList();
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -150,7 +164,7 @@ class _WorkersAndPagesOverviewTabState
                     ),
                     SizedBox(height: 6),
                     Text(
-                      '基于 Wrangler 优先架构的高性能 Cloudflare 桌面端多环境部署管理中心。',
+                      '多环境分布式发布管理中心',
                       style: TextStyle(color: Colors.grey, fontSize: 14),
                     ),
                   ],
@@ -182,76 +196,88 @@ class _WorkersAndPagesOverviewTabState
                 ),
               ],
             ),
-            const SizedBox(height: 28),
+            const SizedBox(height: 24),
 
-            // 双擎卡片展示区 (Workers & Pages，附带实时状态)
+            // 保留的发布快捷入口
+            const Text(
+              '快捷入口',
+              style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF0F172A)),
+            ),
+            const SizedBox(height: 12),
             Row(
               children: [
-                // Workers 概览卡片
                 Expanded(
-                  child: _buildEngineCard(
-                    title: 'Cloudflare Workers',
-                    subtitle: 'Serverless 边缘计算与 API 代理',
+                  child: _buildShortcutCard(
+                    title: '进入 Workers 管理',
+                    subtitle: 'Serverless 边缘计算与代理部署',
                     icon: Icons.cloud_upload_outlined,
                     iconColor: Colors.orange,
-                    statusText: deployState.workerMessage,
-                    statusColor: _getStatusColor(deployState.workerStatus),
-                    features: [
-                      '毫秒级全球冷启动与 V8 隔离环境',
-                      '支持 wrangler.toml 零配置本地调试',
-                      '适用于高性能 API 网关与量化交易代理',
-                    ],
-                    buttonText: '进入 Workers 管理',
                     onPressed: () => widget.onNavigate(1),
                   ),
                 ),
-                const SizedBox(width: 20),
-                // Pages 概览卡片
+                const SizedBox(width: 16),
                 Expanded(
-                  child: _buildEngineCard(
-                    title: 'Cloudflare Pages',
-                    subtitle: '全栈静态与全动态前端托管',
+                  child: _buildShortcutCard(
+                    title: '进入 Pages 管理',
+                    subtitle: '静态与全栈前端资产托管',
                     icon: Icons.web_outlined,
                     iconColor: Colors.blue,
-                    statusText: deployState.pagesMessage,
-                    statusColor: _getStatusColor(deployState.pagesStatus),
-                    features: [
-                      '无限制的全球 CDN 边缘节点加速',
-                      '支持 Vite、Flutter Web、React 等产物托管',
-                      '极速一键部署，自动化构建与发布',
-                    ],
-                    buttonText: '进入 Pages 管理',
                     onPressed: () => widget.onNavigate(2),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 32),
 
-            // 底部快捷提示卡片
+            // 资产列表标题
+            const Text(
+              '本系统发布资产状态列表',
+              style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF0F172A)),
+            ),
+            const SizedBox(height: 12),
+
+            // Tab 标签页容器
             Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: const Color(0xFFCBD5E1)),
               ),
-              child: const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Column(
                 children: [
-                  Text(
-                    '💡 架构提示与开发指引',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                        color: Color(0xFF0F172A)),
+                  // Tab 头部切换条
+                  Container(
+                    decoration: const BoxDecoration(
+                      border:
+                          Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+                    ),
+                    child: TabBar(
+                      controller: _tabController,
+                      labelColor: Colors.blue.shade700,
+                      unselectedLabelColor: Colors.grey,
+                      indicatorColor: Colors.blue,
+                      tabs: [
+                        Tab(text: 'Workers 资产 (${workerItems.length})'),
+                        Tab(text: 'Pages 资产 (${pageItems.length})'),
+                      ],
+                    ),
                   ),
-                  SizedBox(height: 10),
-                  Text(
-                    '当前项目所有操作均由本地封装的 Wrangler CLI 进程驱动。如需核对当前账号的详细权限、Token 范围或凭证路径，请随时访问左侧的“应用信息”菜单。',
-                    style: TextStyle(
-                        color: Color(0xFF475569), fontSize: 13, height: 1.4),
+                  // Tab 内容视图
+                  SizedBox(
+                    height: 320,
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildAssetListView(workerItems, '暂无 Workers 发布记录'),
+                        _buildAssetListView(pageItems, '暂无 Pages 发布记录'),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -262,118 +288,143 @@ class _WorkersAndPagesOverviewTabState
     );
   }
 
-  Widget _buildEngineCard({
+  Widget _buildAssetListView(List<DeployedItem> items, String emptyTip) {
+    if (items.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.inbox_outlined, size: 40, color: Colors.grey.shade400),
+            const SizedBox(height: 8),
+            Text(emptyTip,
+                style: const TextStyle(color: Colors.grey, fontSize: 13)),
+          ],
+        ),
+      );
+    }
+
+    return ListView.separated(
+      padding: EdgeInsets.zero,
+      itemCount: items.length,
+      separatorBuilder: (_, __) =>
+          const Divider(height: 1, color: Color(0xFFE2E8F0)),
+      itemBuilder: (context, index) {
+        final item = items[index];
+        final statusColor = _getStatusColor(item.status);
+        final isWorker = item.type == DeployType.worker;
+
+        return ListTile(
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: (isWorker ? Colors.orange : Colors.blue).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              isWorker ? Icons.bolt : Icons.web,
+              color: isWorker ? Colors.orange : Colors.blue,
+              size: 18,
+            ),
+          ),
+          title: Text(
+            item.name,
+            style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+                color: Color(0xFF0F172A)),
+          ),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 2.0),
+            child: Text(
+              '状态: ${item.message}  •  时间: ${item.timestamp}',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
+          trailing: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: statusColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: statusColor.withOpacity(0.3)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                        color: statusColor, shape: BoxShape.circle)),
+                const SizedBox(width: 6),
+                Text(
+                  item.status == DeployStatus.deploying
+                      ? '正在发布'
+                      : item.status == DeployStatus.success
+                          ? '发布成功'
+                          : item.status == DeployStatus.failed
+                              ? '发布失败'
+                              : '未发布',
+                  style: TextStyle(
+                      color: statusColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildShortcutCard({
     required String title,
     required String subtitle,
     required IconData icon,
     required Color iconColor,
-    required String statusText,
-    required Color statusColor,
-    required List<String> features,
-    required String buttonText,
     required VoidCallback onPressed,
   }) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFCBD5E1)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: iconColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon, color: iconColor, size: 28),
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFCBD5E1)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: iconColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF0F172A))),
-                    const SizedBox(height: 2),
-                    Text(subtitle,
-                        style:
-                            const TextStyle(fontSize: 12, color: Colors.grey)),
-                  ],
-                ),
-              ),
-              // 实时状态徽章
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: statusColor.withOpacity(0.3)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                            color: statusColor, shape: BoxShape.circle)),
-                    const SizedBox(width: 6),
-                    Text(statusText,
-                        style: TextStyle(
-                            color: statusColor,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const Divider(height: 32, color: Color(0xFFE2E8F0)),
-          ...features.map((feature) => Padding(
-                padding: const EdgeInsets.only(bottom: 8.0),
-                child: Row(
-                  children: [
-                    const Icon(Icons.check_circle,
-                        size: 16, color: Colors.green),
-                    const SizedBox(width: 8),
-                    Expanded(
-                        child: Text(feature,
-                            style: const TextStyle(
-                                fontSize: 13, color: Color(0xFF334155)))),
-                  ],
-                ),
-              )),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                side: const BorderSide(color: Color(0xFFCBD5E1)),
-              ),
-              onPressed: onPressed,
-              icon: const Icon(Icons.arrow_forward, size: 16),
-              label: Text(buttonText),
+              child: Icon(icon, color: iconColor, size: 24),
             ),
-          ),
-        ],
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF0F172A))),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                ],
+              ),
+            ),
+            const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
+          ],
+        ),
       ),
     );
   }

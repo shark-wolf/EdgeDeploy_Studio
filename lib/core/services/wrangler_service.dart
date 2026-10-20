@@ -1,78 +1,86 @@
 // ==============================================================================
 // 所属模块: Core / Services
 // 文件路径: lib/core/services/wrangler_service.dart
-// 核心职责: Wrangler CLI 核心进程包装器，支持授权登录、whoami 校验及正确编码的日志捕获
+// 核心职责: 封装 Wrangler CLI 进程调用、授权登录与环境检查（类型安全与 UTF-8 编码解码）
 // ==============================================================================
 
-import 'dart:io';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
+import 'dart:io';
 
 class WranglerService {
-  /// 校验本地是否具备 Node.js 及 wrangler 环境
-  Future<bool> checkEnvironment() async {
+  /// 执行 Wrangler 独立授权登录 (wrangler login)
+  Future<bool> login({required void Function(String log) onLog}) async {
     try {
       final executable = Platform.isWindows ? 'npx.cmd' : 'npx';
-      final result = await Process.run(executable, ['wrangler', '--version']);
-      return result.exitCode == 0;
+      onLog('[信息] 正在唤起浏览器执行 Wrangler 授权登录...\n');
+
+      final process = await Process.start(
+        executable,
+        ['wrangler', 'login'],
+        runInShell: true,
+      );
+
+      process.stdout.transform(utf8.decoder).listen((data) {
+        onLog(data);
+      });
+
+      process.stderr.transform(utf8.decoder).listen((data) {
+        onLog('[错误] $data');
+      });
+
+      final exitCode = await process.exitCode;
+      onLog('\n[信息] 登录进程结束，退出码: $exitCode\n');
+      return exitCode == 0;
     } catch (e) {
-      debugPrint('[WranglerService] 环境检查失败: $e');
+      onLog('\n[异常] 登录调用失败: $e\n');
       return false;
     }
   }
 
-  /// 触发 Wrangler 网页端授权登录 (wrangler login)
-  Future<bool> login({required void Function(String log) onLog}) async {
-    final exitCode = await executeCommand(
-      workingDirectory: '.',
-      arguments: ['login'],
-      onLog: onLog,
-    );
-    return exitCode == 0;
-  }
-
-  /// 检查当前 Wrangler 的登录及账户状态 (wrangler whoami，使用 utf8 防止乱码)
+  /// 检查当前 Wrangler 授权状态（whoami），增加类型安全判断防范编码转换异常
   Future<String> checkWhoAmI() async {
     try {
       final executable = Platform.isWindows ? 'npx.cmd' : 'npx';
-      final result = await Process.run(executable, ['wrangler', 'whoami'],
-          runInShell: true);
+      final result = await Process.run(
+        executable,
+        ['wrangler', 'whoami'],
+        runInShell: true,
+        stdoutEncoding: null,
+        stderrEncoding: null,
+      );
 
-      // 使用 utf8.decode 正确解析标准输出，避免表格边框出现乱码
-      String output = '';
-      try {
-        output = utf8.decode(result.stdout);
-      } catch (_) {
-        output = result.stdout.toString();
-      }
+      // 类型安全解析：兼容 List<int> 与 String，杜绝类型转换异常
+      final stdoutStr = result.stdout is List<int>
+          ? utf8.decode(result.stdout as List<int>, allowMalformed: true)
+          : result.stdout.toString();
+      final stderrStr = result.stderr is List<int>
+          ? utf8.decode(result.stderr as List<int>, allowMalformed: true)
+          : result.stderr.toString();
 
       if (result.exitCode == 0) {
-        return output;
+        return stdoutStr.trim();
       } else {
-        return '未检测到有效登录状态，或执行出错:\n$output';
+        return '未授权或未登录 (${stderrStr.isNotEmpty ? stderrStr.trim() : stdoutStr.trim()})';
       }
     } catch (e) {
-      return '获取账户状态异常: $e';
+      return 'Wrangler 环境检查异常: $e';
     }
   }
 
-  /// 异步执行通用 Wrangler 命令，统一使用 utf8 解码实时日志流
+  /// 执行通用 Wrangler 异步指令（支持实时日志输出，强制 UTF-8 编码）
   Future<int> executeCommand({
     required String workingDirectory,
     required List<String> arguments,
     required void Function(String log) onLog,
   }) async {
-    final isWindows = Platform.isWindows;
-    final executable = isWindows ? 'npx.cmd' : 'npx';
-    final fullArgs = ['wrangler', ...arguments];
-
     try {
+      final executable = Platform.isWindows ? 'npx.cmd' : 'npx';
       onLog('[信息] 正在执行指令: wrangler ${arguments.join(' ')}\n');
 
       final process = await Process.start(
         executable,
-        fullArgs,
-        workingDirectory: workingDirectory,
+        ['wrangler', ...arguments],
+        workingDirectory: workingDirectory.isEmpty ? '.' : workingDirectory,
         runInShell: true,
       );
 
@@ -88,7 +96,7 @@ class WranglerService {
       onLog('\n[信息] 进程执行完毕，退出码: $exitCode\n');
       return exitCode;
     } catch (e) {
-      onLog('\n[严重错误] 无法拉起子进程: $e\n');
+      onLog('\n[异常] 进程启动失败: $e\n');
       return -1;
     }
   }
