@@ -20,6 +20,7 @@ dependencies:
   path_provider: ^2.1.1
   logger: ^2.0.2
   file_picker: ^8.0.0  # 确保包含此项用于桌面端目录选择
+  shared_preferences: ^2.2.2 # 用于本地持久化存储发布历史
 
 dev_dependencies:
   flutter_test:

@@ -1,7 +1,7 @@
 // ==============================================================================
 // 所属模块: Core / Services
 // 文件路径: lib/core/services/wrangler_service.dart
-// 核心职责: 封装 Wrangler CLI 进程调用、授权登录与环境检查（类型安全与 UTF-8 编码解码）
+// 核心职责: 封装 Wrangler CLI 进程调用、授权登录、环境检查与边缘端资产拉取（强制 UTF-8）
 // ==============================================================================
 
 import 'dart:convert';
@@ -37,7 +37,64 @@ class WranglerService {
     }
   }
 
-  /// 检查当前 Wrangler 授权状态（whoami），增加类型安全判断防范编码转换异常
+  /// 获取云端 Pages 项目名称列表
+  Future<List<String>> fetchRemotePagesProjects() async {
+    try {
+      final executable = Platform.isWindows ? 'npx.cmd' : 'npx';
+      final result = await Process.run(
+        executable,
+        ['wrangler', 'pages', 'project', 'list', '--json'],
+        runInShell: true,
+        stdoutEncoding: null,
+        stderrEncoding: null,
+      );
+
+      final stdoutStr = result.stdout is List<int>
+          ? utf8.decode(result.stdout as List<int>, allowMalformed: true)
+          : result.stdout.toString();
+
+      if (result.exitCode == 0 && stdoutStr.trim().isNotEmpty) {
+        final List<dynamic> jsonList = jsonDecode(stdoutStr);
+        return jsonList
+            .map((e) =>
+                e['name']?.toString() ?? e['Project Name']?.toString() ?? '')
+            .where((name) => name.isNotEmpty)
+            .toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  /// 检查指定 Worker 在云端边缘是否存在部署记录
+  Future<bool> checkRemoteWorkerExists(String workerName) async {
+    try {
+      final executable = Platform.isWindows ? 'npx.cmd' : 'npx';
+      final result = await Process.run(
+        executable,
+        ['wrangler', 'deployments', 'list', '--name', workerName, '--json'],
+        runInShell: true,
+        stdoutEncoding: null,
+        stderrEncoding: null,
+      );
+
+      final stdoutStr = result.stdout is List<int>
+          ? utf8.decode(result.stdout as List<int>, allowMalformed: true)
+          : result.stdout.toString();
+
+      if (result.exitCode == 0 && stdoutStr.trim().isNotEmpty) {
+        final decoded = jsonDecode(stdoutStr);
+        if (decoded is List && decoded.isNotEmpty) {
+          return true;
+        } else if (decoded is Map && decoded.containsKey('deployments')) {
+          final list = decoded['deployments'];
+          return list is List && list.isNotEmpty;
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  /// 检查当前 Wrangler 授权状态（whoami）
   Future<String> checkWhoAmI() async {
     try {
       final executable = Platform.isWindows ? 'npx.cmd' : 'npx';
@@ -49,7 +106,6 @@ class WranglerService {
         stderrEncoding: null,
       );
 
-      // 类型安全解析：兼容 List<int> 与 String，杜绝类型转换异常
       final stdoutStr = result.stdout is List<int>
           ? utf8.decode(result.stdout as List<int>, allowMalformed: true)
           : result.stdout.toString();
@@ -67,7 +123,7 @@ class WranglerService {
     }
   }
 
-  /// 执行通用 Wrangler 异步指令（支持实时日志输出，强制 UTF-8 编码）
+  /// 执行通用 Wrangler 异步指令
   Future<int> executeCommand({
     required String workingDirectory,
     required List<String> arguments,

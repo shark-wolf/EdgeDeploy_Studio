@@ -1,7 +1,7 @@
 // ==============================================================================
 // 所属模块: Presentation / Screens
 // 文件路径: lib/presentation/screens/worker_screen.dart
-// 核心职责: Worker 管理与一键发布视图
+// 核心职责: Worker 管理与一键发布视图（每次发布自动写入历史流水）
 // ==============================================================================
 
 import 'package:flutter/material.dart';
@@ -22,8 +22,10 @@ class WorkerScreen extends ConsumerStatefulWidget {
 }
 
 class _WorkerScreenState extends ConsumerState<WorkerScreen> {
-  final TextEditingController _pathController = TextEditingController(text: 'test-worker');
-  final TextEditingController _nameController = TextEditingController(text: 'test-edge-worker');
+  final TextEditingController _pathController =
+      TextEditingController(text: 'test-worker');
+  final TextEditingController _nameController =
+      TextEditingController(text: 'test-edge-worker');
 
   final FocusNode _pathFocusNode = FocusNode();
   final FocusNode _nameFocusNode = FocusNode();
@@ -31,8 +33,6 @@ class _WorkerScreenState extends ConsumerState<WorkerScreen> {
 
   @override
   void dispose() {
-    _pathFocusNode.unfocus();
-    _nameFocusNode.unfocus();
     _pathFocusNode.dispose();
     _nameFocusNode.dispose();
     _pathController.dispose();
@@ -57,14 +57,15 @@ class _WorkerScreenState extends ConsumerState<WorkerScreen> {
     final workerName = _nameController.text.trim();
     setState(() => _isDeploying = true);
 
-    ref.read(deploymentStatusProvider.notifier).upsertItem(
-      name: workerName,
-      type: DeployType.worker,
-      status: DeployStatus.deploying,
-      message: '正在发布...',
-    );
+    // 写入一条新的发布历史记录（状态：正在发布）
+    final deployId = ref.read(deploymentStatusProvider.notifier).recordStart(
+          name: workerName,
+          type: DeployType.worker,
+        );
 
-    ref.read(logProvider.notifier).appendLog('\n[开始] 准备触发 Worker 部署（目标名称: $workerName）...\n');
+    ref
+        .read(logProvider.notifier)
+        .appendLog('\n[开始] 准备触发 Worker 部署（目标名称: $workerName）...\n');
 
     final usecase = DeployWorkerUsecase(wranglerService: WranglerService());
     final exitCode = await usecase.execute(
@@ -78,24 +79,25 @@ class _WorkerScreenState extends ConsumerState<WorkerScreen> {
     if (mounted) {
       setState(() => _isDeploying = false);
       if (exitCode == 0) {
-        ref.read(deploymentStatusProvider.notifier).upsertItem(
-          name: workerName,
-          type: DeployType.worker,
-          status: DeployStatus.success,
-          message: '发布成功',
-        );
+        ref.read(deploymentStatusProvider.notifier).recordResult(
+              id: deployId,
+              status: DeployStatus.success,
+              message: '发布成功',
+            );
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('🎉 Worker 发布成功！'), backgroundColor: Colors.green),
+          const SnackBar(
+              content: Text('🎉 Worker 发布成功！'), backgroundColor: Colors.green),
         );
       } else {
-        ref.read(deploymentStatusProvider.notifier).upsertItem(
-          name: workerName,
-          type: DeployType.worker,
-          status: DeployStatus.failed,
-          message: '发布失败 (状态码: $exitCode)',
-        );
+        ref.read(deploymentStatusProvider.notifier).recordResult(
+              id: deployId,
+              status: DeployStatus.failed,
+              message: '发布失败 (状态码: $exitCode)',
+            );
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ Worker 发布失败 (状态码: $exitCode)'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('❌ Worker 发布失败 (状态码: $exitCode)'),
+              backgroundColor: Colors.red),
         );
       }
     }
@@ -112,7 +114,11 @@ class _WorkerScreenState extends ConsumerState<WorkerScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Cloudflare Workers 发布中心', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+              const Text('Cloudflare Workers 发布中心',
+                  style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF0F172A))),
               const SizedBox(height: 16),
               TextField(
                 controller: _nameController,

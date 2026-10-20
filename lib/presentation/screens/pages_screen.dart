@@ -1,7 +1,7 @@
 // ==============================================================================
 // 所属模块: Presentation / Screens
 // 文件路径: lib/presentation/screens/pages_screen.dart
-// 核心职责: Pages 智能发布视图
+// 核心职责: Pages 智能发布视图（每次发布自动写入历史流水）
 // ==============================================================================
 
 import 'package:flutter/material.dart';
@@ -34,8 +34,6 @@ class _PagesScreenState extends ConsumerState<PagesScreen> {
 
   @override
   void dispose() {
-    _nameFocusNode.unfocus();
-    _projectDirFocusNode.unfocus();
     _nameFocusNode.dispose();
     _projectDirFocusNode.dispose();
     _nameController.dispose();
@@ -60,11 +58,10 @@ class _PagesScreenState extends ConsumerState<PagesScreen> {
     final projectName = _nameController.text.trim();
     setState(() => _isDeploying = true);
 
-    ref.read(deploymentStatusProvider.notifier).upsertItem(
+    // 写入一条新的 Pages 发布历史记录（状态：正在发布）
+    final deployId = ref.read(deploymentStatusProvider.notifier).recordStart(
           name: projectName,
           type: DeployType.page,
-          status: DeployStatus.deploying,
-          message: '正在部署...',
         );
 
     ref.read(logProvider.notifier).appendLog(
@@ -82,9 +79,8 @@ class _PagesScreenState extends ConsumerState<PagesScreen> {
     if (mounted) {
       setState(() => _isDeploying = false);
       if (exitCode == 0) {
-        ref.read(deploymentStatusProvider.notifier).upsertItem(
-              name: projectName,
-              type: DeployType.page,
+        ref.read(deploymentStatusProvider.notifier).recordResult(
+              id: deployId,
               status: DeployStatus.success,
               message: '部署成功',
             );
@@ -93,9 +89,8 @@ class _PagesScreenState extends ConsumerState<PagesScreen> {
               content: Text('🎉 Page 部署成功！'), backgroundColor: Colors.green),
         );
       } else {
-        ref.read(deploymentStatusProvider.notifier).upsertItem(
-              name: projectName,
-              type: DeployType.page,
+        ref.read(deploymentStatusProvider.notifier).recordResult(
+              id: deployId,
               status: DeployStatus.failed,
               message: '部署失败 (状态码: $exitCode)',
             );

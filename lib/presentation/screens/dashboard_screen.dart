@@ -1,7 +1,7 @@
 // ==============================================================================
 // 所属模块: Presentation / Screens
 // 文件路径: lib/presentation/screens/dashboard_screen.dart
-// 核心职责: 主控看板，保留发布快捷入口，资产列表采用 Tab 标签页动态切换展示
+// 核心职责: 主控看板，通过本地记录的名称同步边缘端 Worker 与 Pages 状态并展示在资产列表中
 // ==============================================================================
 
 import 'package:flutter/material.dart';
@@ -72,7 +72,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 }
 
-/// 系统概览视图：快捷入口 + Tab 切换资产列表
+/// 系统概览视图：快捷入口 + 基于本地记录名称同步边缘端资产状态列表
 class WorkersAndPagesOverviewTab extends ConsumerStatefulWidget {
   final ValueChanged<int> onNavigate;
 
@@ -88,6 +88,7 @@ class _WorkersAndPagesOverviewTabState
     with SingleTickerProviderStateMixin {
   final WranglerService _wranglerService = WranglerService();
   String _envSummary = '正在加载 Wrangler 运行环境...';
+  bool _isSyncing = false;
   late TabController _tabController;
 
   @override
@@ -119,6 +120,49 @@ class _WorkersAndPagesOverviewTabState
     }
   }
 
+  /// 同步边缘端数据：根据本地记录的 Worker 与 Pages 名称获取云端边缘状态并匹配展示
+  Future<void> _syncCloudflareRemote() async {
+    if (_isSyncing) return;
+    setState(() => _isSyncing = true);
+
+    try {
+      // 1. 获取云端边缘 Pages 项目列表
+      final remotePages = await _wranglerService.fetchRemotePagesProjects();
+
+      // 2. 遍历本地记录的资产，逐个同步边缘端状态
+      final currentItems = ref.read(deploymentStatusProvider).items;
+      final updatedItems = <DeployedItem>[];
+
+      for (var item in currentItems) {
+        if (item.type == DeployType.page) {
+          final existsOnEdge = remotePages.contains(item.name);
+          final newMsg = existsOnEdge ? '边缘端运行中 (已同步)' : '边缘端未找到';
+          updatedItems.add(item.copyWith(message: newMsg));
+        } else if (item.type == DeployType.worker) {
+          final existsOnEdge =
+              await _wranglerService.checkRemoteWorkerExists(item.name);
+          final newMsg = existsOnEdge ? '边缘端运行中 (已同步)' : '边缘端未找到';
+          updatedItems.add(item.copyWith(message: newMsg));
+        } else {
+          updatedItems.add(item);
+        }
+      }
+
+      ref.read(deploymentStatusProvider.notifier).state =
+          DeploymentStatusModel(items: updatedItems);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('☁️ 已根据本地记录名称成功同步边缘端状态！'),
+              backgroundColor: Colors.blue),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSyncing = false);
+    }
+  }
+
   Color _getStatusColor(DeployStatus status) {
     switch (status) {
       case DeployStatus.deploying:
@@ -127,9 +171,6 @@ class _WorkersAndPagesOverviewTabState
         return Colors.green;
       case DeployStatus.failed:
         return Colors.red;
-      case DeployStatus.idle:
-      default:
-        return Colors.grey;
     }
   }
 
@@ -232,13 +273,32 @@ class _WorkersAndPagesOverviewTabState
             ),
             const SizedBox(height: 32),
 
-            // 资产列表标题
-            const Text(
-              '本系统发布资产状态列表',
-              style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF0F172A)),
+            // 资产列表标题与云端边缘同步按钮
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  '本系统发布资产历史流水列表',
+                  style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF0F172A)),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _isSyncing ? null : _syncCloudflareRemote,
+                  icon: _isSyncing
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.sync, size: 16),
+                  label: Text(_isSyncing ? '正在同步边缘...' : '同步边缘资产'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.blue.shade700,
+                    side: BorderSide(color: Colors.blue.shade200),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
 
@@ -363,9 +423,7 @@ class _WorkersAndPagesOverviewTabState
                       ? '正在发布'
                       : item.status == DeployStatus.success
                           ? '发布成功'
-                          : item.status == DeployStatus.failed
-                              ? '发布失败'
-                              : '未发布',
+                          : '发布失败',
                   style: TextStyle(
                       color: statusColor,
                       fontSize: 12,
