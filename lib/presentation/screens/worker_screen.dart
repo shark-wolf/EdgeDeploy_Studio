@@ -1,10 +1,9 @@
 // ==============================================================================
 // 所属模块: Presentation / Screens
 // 文件路径: lib/presentation/screens/worker_screen.dart
-// 核心职责: Workers 边缘计算管理、一键发布 (自动维护 wrangler.toml 的 workers_dev 开关)
+// 核心职责: Workers 边缘计算管理、纯 Wrangler 驱动的一键发布
 // ==============================================================================
 
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
@@ -24,14 +23,8 @@ class _WorkerScreenState extends ConsumerState<WorkerScreen> {
   final TextEditingController _nameController =
       TextEditingController(text: 'my-worker');
   final TextEditingController _dirController = TextEditingController(text: '');
-  final TextEditingController _subdomainController =
-      TextEditingController(text: '');
-  final TextEditingController _mainDomainController =
-      TextEditingController(text: 'ccwu.cc');
 
   bool _isPublishing = false;
-  bool _enableWorkersDev = true; // 启用/禁用 .dev 域名开关
-  bool _enableCustomDomain = false; // 是否启用自定义域名
   String? _deletingItemId;
 
   Future<void> _pickWorkingDirectory() async {
@@ -40,32 +33,6 @@ class _WorkerScreenState extends ConsumerState<WorkerScreen> {
       setState(() {
         _dirController.text = selectedDirectory;
       });
-    }
-  }
-
-  /// 自动修改或写入工作目录下的 wrangler.toml 中的 workers_dev 配置
-  Future<void> _updateWranglerToml(
-      String dir, String name, bool enableDev) async {
-    final separator = Platform.pathSeparator;
-    final tomlFile = File('$dir${separator}wrangler.toml');
-    try {
-      String content = '';
-      if (await tomlFile.exists()) {
-        content = await tomlFile.readAsString();
-        if (content.contains('workers_dev')) {
-          content = content.replaceAll(
-              RegExp(r'workers_dev\s*=\s*(true|false)', caseSensitive: false),
-              'workers_dev = $enableDev');
-        } else {
-          content += '\nworkers_dev = $enableDev\n';
-        }
-      } else {
-        content =
-            'name = "$name"\nmain = "src/index.js"\ncompatibility_date = "2024-01-01"\nworkers_dev = $enableDev\n';
-      }
-      await tomlFile.writeAsString(content);
-    } catch (e) {
-      debugPrint('更新 wrangler.toml 失败: $e');
     }
   }
 
@@ -97,30 +64,17 @@ class _WorkerScreenState extends ConsumerState<WorkerScreen> {
           type: DeployType.worker,
         );
 
-    ref.read(logProvider.notifier).appendLog(
-        '\n[开始] 准备发布 Worker: $name (.dev: ${_enableWorkersDev ? "已启用" : "已禁用"})...\n');
+    ref
+        .read(logProvider.notifier)
+        .appendLog('\n[开始] 触发发布 Worker: $name (依赖 wrangler.toml 配置)...\n');
 
     try {
-      // 核心修复：通过修改 wrangler.toml 文件来正确控制 workers.dev 的启用/禁用
-      await _updateWranglerToml(dir, name, _enableWorkersDev);
-
-      // 执行标准的 wrangler deploy 命令
       final args = ['deploy', '--name', name];
       final exitCode = await _wranglerService.executeCommand(
         workingDirectory: dir,
         arguments: args,
         onLog: (log) => ref.read(logProvider.notifier).appendLog(log),
       );
-
-      if (exitCode == 0 && _enableCustomDomain) {
-        final mainDomain = _mainDomainController.text.trim();
-        final subdomain = _subdomainController.text.trim();
-        final fullDomain =
-            subdomain.isNotEmpty ? '$subdomain.$mainDomain' : mainDomain;
-        ref
-            .read(logProvider.notifier)
-            .appendLog('[信息] 自定义域名绑定准备就绪: $fullDomain\n');
-      }
 
       if (exitCode == 0) {
         ref.read(deploymentStatusProvider.notifier).recordResult(
@@ -245,76 +199,6 @@ class _WorkerScreenState extends ConsumerState<WorkerScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  // .dev 域名开关（状态文字随开关实时变化）
-                  SwitchListTile(
-                    title: const Text('启用 .dev 域名 (workers.dev)',
-                        style: TextStyle(fontSize: 14)),
-                    subtitle: Text(
-                      _enableWorkersDev
-                          ? '当前状态: 已启用 (将自动生成及分发 workers.dev 子域名)'
-                          : '当前状态: 已禁用 (不分发 workers.dev 子域名)',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: _enableWorkersDev
-                            ? Colors.green.shade700
-                            : Colors.red.shade700,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    value: _enableWorkersDev,
-                    onChanged: (val) => setState(() => _enableWorkersDev = val),
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                  const Divider(height: 24),
-                  // 自定义域名配置
-                  CheckboxListTile(
-                    title:
-                        const Text('配置自定义域名', style: TextStyle(fontSize: 14)),
-                    subtitle: const Text('填写子域名与主域名',
-                        style: TextStyle(fontSize: 12, color: Colors.grey)),
-                    value: _enableCustomDomain,
-                    onChanged: (val) =>
-                        setState(() => _enableCustomDomain = val ?? false),
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                  if (_enableCustomDomain) ...[
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          flex: 2,
-                          child: TextField(
-                            controller: _subdomainController,
-                            decoration: const InputDecoration(
-                              labelText: '子域名 (选填)',
-                              hintText: '例如: api',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                          ),
-                        ),
-                        const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 8.0),
-                          child: Text('.',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 16)),
-                        ),
-                        Expanded(
-                          flex: 3,
-                          child: TextField(
-                            controller: _mainDomainController,
-                            decoration: const InputDecoration(
-                              labelText: '主域名',
-                              hintText: '例如: ccwu.cc',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
                   const SizedBox(height: 20),
                   SizedBox(
                     width: double.infinity,

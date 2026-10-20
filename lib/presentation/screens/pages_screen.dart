@@ -1,7 +1,7 @@
 // ==============================================================================
 // 所属模块: Presentation / Screens
 // 文件路径: lib/presentation/screens/pages_screen.dart
-// 核心职责: Pages 静态资产托管管理、一键发布 (已移除底层不支持的 pages.dev 开关)
+// 核心职责: Pages 静态资产托管管理、纯 Wrangler 驱动的一键发布
 // ==============================================================================
 
 import 'package:flutter/material.dart';
@@ -23,13 +23,8 @@ class _PagesScreenState extends ConsumerState<PagesScreen> {
   final TextEditingController _projectNameController =
       TextEditingController(text: 'my-pages-project');
   final TextEditingController _dirController = TextEditingController(text: '');
-  final TextEditingController _subdomainController =
-      TextEditingController(text: '');
-  final TextEditingController _mainDomainController =
-      TextEditingController(text: 'ccwu.cc');
 
   bool _isPublishing = false;
-  bool _enableCustomDomain = false; // 是否启用自定义域名
   String? _deletingItemId;
 
   Future<void> _pickWorkingDirectory() async {
@@ -69,9 +64,8 @@ class _PagesScreenState extends ConsumerState<PagesScreen> {
           type: DeployType.page,
         );
 
-    ref
-        .read(logProvider.notifier)
-        .appendLog('\n[开始] 准备发布 Pages 项目: $projectName...\n');
+    ref.read(logProvider.notifier).appendLog(
+        '\n[开始] 准备发布 Pages 项目: $projectName (依赖 wrangler.toml 配置)...\n');
 
     try {
       await _wranglerService.executeCommand(
@@ -93,16 +87,6 @@ class _PagesScreenState extends ConsumerState<PagesScreen> {
         arguments: args,
         onLog: (log) => ref.read(logProvider.notifier).appendLog(log),
       );
-
-      if (exitCode == 0 && _enableCustomDomain) {
-        final mainDomain = _mainDomainController.text.trim();
-        final subdomain = _subdomainController.text.trim();
-        final fullDomain =
-            subdomain.isNotEmpty ? '$subdomain.$mainDomain' : mainDomain;
-        ref
-            .read(logProvider.notifier)
-            .appendLog('[信息] 自定义域名绑定准备就绪: $fullDomain\n');
-      }
 
       if (exitCode == 0) {
         ref.read(deploymentStatusProvider.notifier).recordResult(
@@ -227,55 +211,6 @@ class _PagesScreenState extends ConsumerState<PagesScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  // 自定义域名配置
-                  CheckboxListTile(
-                    title:
-                        const Text('配置自定义域名', style: TextStyle(fontSize: 14)),
-                    subtitle: const Text('填写子域名与主域名',
-                        style: TextStyle(fontSize: 12, color: Colors.grey)),
-                    value: _enableCustomDomain,
-                    onChanged: (val) =>
-                        setState(() => _enableCustomDomain = val ?? false),
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                  if (_enableCustomDomain) ...[
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          flex: 2,
-                          child: TextField(
-                            controller: _subdomainController,
-                            decoration: const InputDecoration(
-                              labelText: '子域名 (选填)',
-                              hintText: '例如: docs',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                          ),
-                        ),
-                        const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 8.0),
-                          child: Text('.',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 16)),
-                        ),
-                        Expanded(
-                          flex: 3,
-                          child: TextField(
-                            controller: _mainDomainController,
-                            decoration: const InputDecoration(
-                              labelText: '主域名',
-                              hintText: '例如: ccwu.cc',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
                   const SizedBox(height: 20),
                   SizedBox(
                     width: double.infinity,

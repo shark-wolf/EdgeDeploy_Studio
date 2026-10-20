@@ -1,0 +1,4 @@
+name = "test-pages-project"
+compatibility_date = "2024-01-01"
+# Pages 项目专用的静态资产构建输出目录
+pages_build_output_dir = "./dist"

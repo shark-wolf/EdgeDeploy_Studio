@@ -1,0 +1,5 @@
+name = "test-edge-worker"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+# 对应控制台中的 .dev 域名开关状态 (true 启用 / false 禁用)
+workers_dev = true
