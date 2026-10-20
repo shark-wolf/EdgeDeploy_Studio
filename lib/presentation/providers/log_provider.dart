@@ -1,23 +1,51 @@
 // ==============================================================================
 // 所属模块: Presentation / Providers
 // 文件路径: lib/presentation/providers/log_provider.dart
-// 核心职责: 管理桌面端实时构建与发布日志流的 Riverpod 状态提供者
+// 核心职责: 全局日志状态管理（支持日志启用/关闭开关、追加日志与清空）
 // ==============================================================================
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class LogNotifier extends StateNotifier<String> {
-  LogNotifier() : super('=== EdgeDeploy-Studio 实时日志控制台已就绪 ===\n');
+class LogState {
+  final List<String> logs;
+  final bool isEnabled;
 
-  void appendLog(String log) {
-    state = state + log;
-  }
+  const LogState({
+    this.logs = const [],
+    this.isEnabled = true, // 默认开启
+  });
 
-  void clearLogs() {
-    state = '=== 日志已清空 ===\n';
+  LogState copyWith({
+    List<String>? logs,
+    bool? isEnabled,
+  }) {
+    return LogState(
+      logs: logs ?? this.logs,
+      isEnabled: isEnabled ?? this.isEnabled,
+    );
   }
 }
 
-final logProvider = StateNotifierProvider<LogNotifier, String>((ref) {
-  return LogNotifier();
-});
+class LogNotifier extends StateNotifier<LogState> {
+  LogNotifier() : super(const LogState());
+
+  /// 追加日志（若日志开关关闭则忽略）
+  void appendLog(String log) {
+    if (!state.isEnabled) return;
+    state = state.copyWith(logs: [...state.logs, log]);
+  }
+
+  /// 清空所有日志
+  void clear() {
+    state = state.copyWith(logs: []);
+  }
+
+  /// 切换日志开关状态
+  void toggle(bool enabled) {
+    state = state.copyWith(isEnabled: enabled);
+  }
+}
+
+final logProvider = StateNotifierProvider<LogNotifier, LogState>(
+  (ref) => LogNotifier(),
+);

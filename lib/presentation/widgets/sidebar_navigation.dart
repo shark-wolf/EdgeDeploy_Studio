@@ -1,7 +1,7 @@
 // ==============================================================================
 // 所属模块: Presentation / Widgets
 // 文件路径: lib/presentation/widgets/sidebar_navigation.dart
-// 核心职责: 桌面端侧边栏导航组件（包含 4 个核心导航项及底部退出登录）
+// 核心职责: 左侧导航栏，集成系统各功能模块跳转入口（修复 onTap 属性）
 // ==============================================================================
 
 import 'package:flutter/material.dart';
@@ -20,70 +20,117 @@ class SidebarNavigation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return NavigationRail(
-      selectedIndex: currentIndex,
-      onDestinationSelected: onDestinationSelected,
-      labelType: NavigationRailLabelType.all,
-      leading: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16.0),
-        child: Column(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.asset(
-                'assets/icons/app_icon.png',
-                width: 44,
-                height: 44,
-                fit: BoxFit.cover,
+    return Container(
+      width: 240,
+      color: Colors.white,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.cloud_queue,
+                      color: Colors.blue, size: 24),
+                ),
+                const SizedBox(width: 12),
+                const Text(
+                  'EdgeDeploy',
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF0F172A)),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: Color(0xFFE2E8F0)),
+          const SizedBox(height: 12),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              children: [
+                _buildNavItem(
+                    index: 0, icon: Icons.dashboard_outlined, label: '系统概览'),
+                const SizedBox(height: 4),
+                _buildNavItem(index: 1, icon: Icons.bolt, label: 'Workers 管理'),
+                const SizedBox(height: 4),
+                _buildNavItem(index: 2, icon: Icons.web, label: 'Pages 管理'),
+                const SizedBox(height: 4),
+                _buildNavItem(index: 3, icon: Icons.terminal, label: '日志控制台'),
+                const SizedBox(height: 4),
+                _buildNavItem(
+                    index: 4, icon: Icons.info_outline, label: '关于系统'),
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: Color(0xFFE2E8F0)),
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: SizedBox(
+              width: double.infinity,
+              child: TextButton.icon(
+                onPressed: onLogout,
+                icon:
+                    const Icon(Icons.logout, size: 18, color: Colors.redAccent),
+                label: const Text('退出登录',
+                    style: TextStyle(color: Colors.redAccent)),
+                style: TextButton.styleFrom(
+                  alignment: Alignment.centerLeft,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
               ),
             ),
-            const SizedBox(height: 6),
-            const Text(
-              'EdgeDeploy',
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey,
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
-      trailing: Expanded(
-        child: Align(
-          alignment: Alignment.bottomCenter,
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 16.0),
-            child: IconButton(
-              icon: const Icon(Icons.logout, color: Colors.redAccent),
-              tooltip: '退出登录',
-              onPressed: onLogout,
-            ),
+    );
+  }
+
+  Widget _buildNavItem(
+      {required int index, required IconData icon, required String label}) {
+    final isSelected = currentIndex == index;
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: () => onDestinationSelected(index), // 修复：InkWell 属性名为 onTap
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: isSelected ? Colors.blue.shade50 : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                icon,
+                size: 20,
+                color:
+                    isSelected ? Colors.blue.shade700 : const Color(0xFF64748B),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  color: isSelected
+                      ? Colors.blue.shade700
+                      : const Color(0xFF334155),
+                ),
+              ),
+            ],
           ),
         ),
       ),
-      destinations: const [
-        NavigationRailDestination(
-          icon: Icon(Icons.dashboard_outlined),
-          selectedIcon: Icon(Icons.dashboard),
-          label: Text('系统概览'),
-        ),
-        NavigationRailDestination(
-          icon: Icon(Icons.cloud_upload_outlined),
-          selectedIcon: Icon(Icons.cloud_upload),
-          label: Text('Workers'),
-        ),
-        NavigationRailDestination(
-          icon: Icon(Icons.web_outlined),
-          selectedIcon: Icon(Icons.web),
-          label: Text('Pages'),
-        ),
-        NavigationRailDestination(
-          icon: Icon(Icons.info_outline),
-          selectedIcon: Icon(Icons.info),
-          label: Text('应用信息'),
-        ),
-      ],
     );
   }
 }

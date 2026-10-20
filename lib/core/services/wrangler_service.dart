@@ -1,7 +1,7 @@
 // ==============================================================================
 // 所属模块: Core / Services
 // 文件路径: lib/core/services/wrangler_service.dart
-// 核心职责: 封装 Wrangler CLI 进程调用、授权登录、环境检查与边缘端资产拉取（强制 UTF-8）
+// 核心职责: 封装 Wrangler CLI 进程调用、授权登录、环境检查、边缘资产拉取与带日志输出的边缘端删除
 // ==============================================================================
 
 import 'dart:convert';
@@ -94,6 +94,28 @@ class WranglerService {
     return false;
   }
 
+  /// 从边缘端删除指定 Worker（支持日志流式输出）
+  Future<bool> deleteRemoteWorker(String workerName,
+      {required void Function(String log) onLog}) async {
+    final exitCode = await executeCommand(
+      workingDirectory: '',
+      arguments: ['delete', workerName, '--force'],
+      onLog: onLog,
+    );
+    return exitCode == 0;
+  }
+
+  /// 从边缘端删除指定 Pages 项目（支持日志流式输出）
+  Future<bool> deleteRemotePagesProject(String projectName,
+      {required void Function(String log) onLog}) async {
+    final exitCode = await executeCommand(
+      workingDirectory: '',
+      arguments: ['pages', 'project', 'delete', projectName],
+      onLog: onLog,
+    );
+    return exitCode == 0;
+  }
+
   /// 检查当前 Wrangler 授权状态（whoami）
   Future<String> checkWhoAmI() async {
     try {
@@ -123,7 +145,7 @@ class WranglerService {
     }
   }
 
-  /// 执行通用 Wrangler 异步指令
+  /// 执行通用 Wrangler 异步指令（实时输出日志）
   Future<int> executeCommand({
     required String workingDirectory,
     required List<String> arguments,

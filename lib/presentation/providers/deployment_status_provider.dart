@@ -1,7 +1,7 @@
 // ==============================================================================
 // 所属模块: Presentation / Providers
 // 文件路径: lib/presentation/providers/deployment_status_provider.dart
-// 核心职责: 本地磁盘仅持久化存储发布过的 Worker 与 Pages 名称和类型，支撑重启恢复与资产列表构建
+// 核心职责: 管理本地发布历史名称持久化，支持新增、更新与删除资产记录
 // ==============================================================================
 
 import 'dart:convert';
@@ -56,14 +56,13 @@ class DeploymentStatusModel {
 }
 
 class DeploymentStatusNotifier extends StateNotifier<DeploymentStatusModel> {
-  // 核心约束：本地磁盘仅保存发布过的 worker 与 page 名称和类型
   static const String _storageKey = 'edge_deploy_published_names_v1';
 
   DeploymentStatusNotifier() : super(const DeploymentStatusModel()) {
     _loadNamesFromDisk();
   }
 
-  /// 从本地磁盘加载历史发布过的名称和类型，重建资产列表
+  /// 从本地磁盘加载历史发布的名称和类型，重建资产列表
   Future<void> _loadNamesFromDisk() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -88,7 +87,7 @@ class DeploymentStatusNotifier extends StateNotifier<DeploymentStatusModel> {
     } catch (_) {}
   }
 
-  /// 仅将发布过的 asset 名称和类型持久化到本地磁盘
+  /// 将发布过的名称和类型持久化到本地磁盘
   Future<void> _saveNamesToDisk() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -106,7 +105,7 @@ class DeploymentStatusNotifier extends StateNotifier<DeploymentStatusModel> {
     } catch (_) {}
   }
 
-  /// 记录一次新的发布动作开始（不管成功与否，名称均记录在本地）
+  /// 记录一次新的发布动作开始
   String recordStart({required String name, required DeployType type}) {
     final id = '${type.name}-$name';
     final now = DateTime.now();
@@ -132,7 +131,7 @@ class DeploymentStatusNotifier extends StateNotifier<DeploymentStatusModel> {
     newList.insert(0, newItem);
 
     state = state.copyWith(items: newList);
-    _saveNamesToDisk(); // 仅持久化名称到本地
+    _saveNamesToDisk();
     return id;
   }
 
@@ -150,12 +149,19 @@ class DeploymentStatusNotifier extends StateNotifier<DeploymentStatusModel> {
     }).toList();
 
     state = state.copyWith(items: updatedItems);
-    _saveNamesToDisk(); // 确保名称已持久化
+    _saveNamesToDisk();
   }
 
   /// 批量更新状态（用于边缘同步匹配）
   void updateAll(List<DeployedItem> newItems) {
     state = state.copyWith(items: newItems);
+    _saveNamesToDisk();
+  }
+
+  /// 根据 ID 删除指定的资产记录，并同步更新本地磁盘存储
+  void removeItem(String id) {
+    final updatedItems = state.items.where((item) => item.id != id).toList();
+    state = state.copyWith(items: updatedItems);
     _saveNamesToDisk();
   }
 }

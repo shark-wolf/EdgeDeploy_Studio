@@ -1,7 +1,7 @@
 // ==============================================================================
 // 所属模块: Presentation / Screens
 // 文件路径: lib/presentation/screens/dashboard_screen.dart
-// 核心职责: 主控看板，通过本地记录的名称同步边缘端 Worker 与 Pages 状态并展示在资产列表中
+// 核心职责: 主控看板，集成系统概览、快捷入口、边缘同步及资产历史展示（已移除概述列表中的删除操作）
 // ==============================================================================
 
 import 'package:flutter/material.dart';
@@ -11,6 +11,7 @@ import '../providers/deployment_status_provider.dart';
 import '../widgets/sidebar_navigation.dart';
 import 'worker_screen.dart';
 import 'pages_screen.dart';
+import 'log_console_screen.dart';
 import 'app_info_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -36,6 +37,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     WorkersAndPagesOverviewTab(onNavigate: _switchTab),
     const WorkerScreen(),
     const PagesScreen(),
+    const LogConsoleScreen(),
     const AppInfoScreen(),
   ];
 
@@ -72,7 +74,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 }
 
-/// 系统概览视图：快捷入口 + 基于本地记录名称同步边缘端资产状态列表
+/// 系统概览视图：快捷入口 + 边缘同步 + Tab 切换资产列表（仅查看与同步，无删除）
 class WorkersAndPagesOverviewTab extends ConsumerStatefulWidget {
   final ValueChanged<int> onNavigate;
 
@@ -120,16 +122,12 @@ class _WorkersAndPagesOverviewTabState
     }
   }
 
-  /// 同步边缘端数据：根据本地记录的 Worker 与 Pages 名称获取云端边缘状态并匹配展示
   Future<void> _syncCloudflareRemote() async {
     if (_isSyncing) return;
     setState(() => _isSyncing = true);
 
     try {
-      // 1. 获取云端边缘 Pages 项目列表
       final remotePages = await _wranglerService.fetchRemotePagesProjects();
-
-      // 2. 遍历本地记录的资产，逐个同步边缘端状态
       final currentItems = ref.read(deploymentStatusProvider).items;
       final updatedItems = <DeployedItem>[];
 
@@ -148,8 +146,7 @@ class _WorkersAndPagesOverviewTabState
         }
       }
 
-      ref.read(deploymentStatusProvider.notifier).state =
-          DeploymentStatusModel(items: updatedItems);
+      ref.read(deploymentStatusProvider.notifier).updateAll(updatedItems);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -189,7 +186,6 @@ class _WorkersAndPagesOverviewTabState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 顶部欢迎标语与环境徽章
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -238,8 +234,6 @@ class _WorkersAndPagesOverviewTabState
               ],
             ),
             const SizedBox(height: 24),
-
-            // 保留的发布快捷入口
             const Text(
               '快捷入口',
               style: TextStyle(
@@ -272,8 +266,6 @@ class _WorkersAndPagesOverviewTabState
               ],
             ),
             const SizedBox(height: 32),
-
-            // 资产列表标题与云端边缘同步按钮
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -301,8 +293,6 @@ class _WorkersAndPagesOverviewTabState
               ],
             ),
             const SizedBox(height: 12),
-
-            // Tab 标签页容器
             Container(
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -311,7 +301,6 @@ class _WorkersAndPagesOverviewTabState
               ),
               child: Column(
                 children: [
-                  // Tab 头部切换条
                   Container(
                     decoration: const BoxDecoration(
                       border:
@@ -328,7 +317,6 @@ class _WorkersAndPagesOverviewTabState
                       ],
                     ),
                   ),
-                  // Tab 内容视图
                   SizedBox(
                     height: 320,
                     child: TabBarView(

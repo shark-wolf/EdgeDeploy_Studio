@@ -1,7 +1,7 @@
 // ==============================================================================
 // 所属模块: Presentation / Widgets
 // 文件路径: lib/presentation/widgets/log_console_widget.dart
-// 核心职责: 用于展示 wrangler 实时输出日志的现代化深色终端控制台组件
+// 核心职责: 日志输出组件，修复布尔判断类型错误
 // ==============================================================================
 
 import 'package:flutter/material.dart';
@@ -13,21 +13,23 @@ class LogConsoleWidget extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final logContent = ref.watch(logProvider);
+    final logState = ref.watch(logProvider);
+    final logNotifier = ref.read(logProvider.notifier);
     final scrollController = ScrollController();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (scrollController.hasClients) {
+    ref.listen(logProvider, (previous, next) {
+      if (scrollController.hasClients && next.logs.isNotEmpty) {
         scrollController.jumpTo(scrollController.position.maxScrollExtent);
       }
     });
 
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E1E1E),
+        color: const Color(0xFF0F172A),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade800),
+        border: Border.all(color: const Color(0xFF334155)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -36,33 +38,46 @@ class LogConsoleWidget extends ConsumerWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                '终端实时输出 (Console Output)',
+                '执行日志',
                 style: TextStyle(
-                    color: Colors.grey,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12),
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold),
               ),
-              IconButton(
-                icon: const Icon(Icons.cleaning_services,
-                    size: 16, color: Colors.grey),
-                tooltip: '清空控制台',
-                onPressed: () => ref.read(logProvider.notifier).clearLogs(),
+              TextButton.icon(
+                onPressed: () => logNotifier.clear(),
+                icon: const Icon(Icons.delete_sweep,
+                    size: 14, color: Colors.redAccent),
+                label: const Text('清空',
+                    style: TextStyle(color: Colors.redAccent, fontSize: 12)),
+                style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero, minimumSize: const Size(50, 24)),
               ),
             ],
           ),
-          const Divider(color: Colors.grey),
+          const SizedBox(height: 6),
           Expanded(
-            child: SingleChildScrollView(
-              controller: scrollController,
-              child: SelectableText(
-                logContent,
-                style: const TextStyle(
-                  color: Colors.greenAccent,
-                  fontFamily: 'monospace',
-                  fontSize: 13,
-                ),
-              ),
-            ),
+            child: logState.logs.isEmpty // 修复：恢复为正确的 bool 判断
+                ? const Center(
+                    child: Text('暂无日志...',
+                        style: TextStyle(color: Colors.grey, fontSize: 11)))
+                : ListView.builder(
+                    controller: scrollController,
+                    itemCount: logState.logs.length,
+                    itemBuilder: (context, index) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 1.0),
+                        child: Text(
+                          logState.logs[index],
+                          style: const TextStyle(
+                            color: Colors.greenAccent,
+                            fontFamily: 'monospace',
+                            fontSize: 11,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
